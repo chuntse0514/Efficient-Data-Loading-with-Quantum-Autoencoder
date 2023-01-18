@@ -8,6 +8,14 @@ from torch import nn
 def kronecker(A, B):
     return torch.einsum("ab,cd->acbd", A, B).view(A.size(0)*B.size(0),  A.size(1)*B.size(1))
 
+def kronecker_complex(A: tuple, B: tuple):
+    A_r, A_i = A
+    B_r, B_i = B
+    return (
+        kronecker(A_r, B_r) - kronecker(A_i, B_i),
+        kronecker(A_i, B_r) + kronecker(A_r, B_i),
+    )
+
 
 def batch_kronecker(A, B):
     return torch.einsum("na,nb->nab", A, B).view(A.size(0), A.size(1) * B.size(1))
@@ -55,6 +63,23 @@ class ParallelRYComplex(nn.Module):
         single_qubit_gates = torch.cat([cos, -sin, sin, cos], dim=-1).view(self.n_qubit, 2, 2)
         op = reduce(lambda a, b: kronecker(a, b), single_qubit_gates)
         return (x[0] @ op, x[1] @ op)
+
+class ParallelRXComplex(nn.Module):
+
+    def __init__(self, n_qubit: int):
+        super().__init__()
+        self.n_qubit = n_qubit
+        self.params = nn.Parameter(
+            (torch.rand([n_qubit]) * 2 - 1) * np.pi
+        )
+
+    def forward(self, x: tuple):
+        cos = torch.cos(self.params).view(self.n_qubit, 1)
+        sin = torch.sin(self.params).view(self.n_qubit, 1)
+        single_qubit_gates_real = torch.cat([cos, 0, 0, cos], dim=-1).view(self.n_qubit, 2, 2)
+        single_qubit_gates_imag = torch.cat([0, -sin, -sin, 0], dim=-1).view(self.n_qubit, 2, 2)
+        op = reduce(lambda a, b: kronecker(a, b), zip(single_qubit_gates_real, single_qubit_gates_imag))
+        return (x[0] @ op[0] - x[1] @ op[1], x[0] @ op[1] + x[1] @ op[0])
 
 
 class Entangle(nn.Module):

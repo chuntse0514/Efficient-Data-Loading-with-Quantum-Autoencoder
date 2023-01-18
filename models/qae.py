@@ -14,6 +14,7 @@ from .torch_circuit import (
     batch_kronecker_complex,
 )
 from utils import epsilon, ints_to_onehot, evaluate
+from tqdm import tqdm
 
 
 class Encoder(nn.Module):
@@ -75,21 +76,26 @@ class QAE(ModelBaseClass):
         )
 
     def fit(self, data: np.array) -> np.array:
-        data_counts = counts(data, self.n_qubit)
+        
+        data_dist = counts(data, self.n_qubit)
+        epoch_div_history = []
+
         for i_epoch in range(self.n_epoch):
             recon_losses = []
-            trace_losses = []
-            for real_batch in DataGenerator(data, self.batch_size):
-                recon_loss, trace_loss = self.fit_batch(real_batch)
+            purity_losses = []
+            for real_batch in tqdm(DataGenerator(data, self.batch_size)):
+                recon_loss, purity_loss = self.fit_batch(real_batch)
                 recon_losses.append(recon_loss)
-                trace_losses.append(trace_loss)
+                purity_losses.append(purity_loss)
 
-            print(f'{i_epoch:3d} RECON: {np.mean(recon_losses):4f} TRACE: {np.mean(trace_losses):4f}')
+            epoch_div_history.append(evaluate(data_dist, self.output_dist(data)))
+            if (i_epoch+1) % 5 == 0:
+                print(f'epoch{i_epoch+1:3d} RECON: {np.mean(recon_losses):4f} Avg_purity: {-np.mean(purity_losses)/self.n_qubit:4f}')
+                print(epoch_div_history[-1])
 
-        eval_results = evaluate(data_counts, self.get_exact_outcome(data))
-        print("Stats with exact density matrix:")
-        pprint(eval_results)
-        return self.get_outcome(data)
+        kl_div = [x['kl'] for x in epoch_div_history]
+        js_div = [x['js'] for x in epoch_div_history]
+        return kl_div, js_div
 
     def get_outcome(self, data: np.array):
         with torch.no_grad():
@@ -97,7 +103,7 @@ class QAE(ModelBaseClass):
             probs = self.decoder.forward_prob(z)[0]
         return probs.cpu().data.numpy()
 
-    def get_exact_outcome(self, data: np.array):
+    def output_dist(self, data: np.array):
         probs = []
         for batch in DataGenerator(data, self.batch_size):
             batch = torch.from_numpy(batch).to(self.device).long()
@@ -152,20 +158,20 @@ class QAE(ModelBaseClass):
         ], dim=-1).view(-1, self.n_qubit, 2, 2)
         
         mean_rho_real, mean_rho_imag = rho_real.mean(dim=0), rho_imag.mean(dim=0)
-        trace_loss = self.calculate_trace_loss(mean_rho_real, mean_rho_imag)        
+        purity_loss = self.calculate_purity_loss(mean_rho_real, mean_rho_imag)        
         
-        loss = recon_loss.mean() + 100. * trace_loss
+        loss = recon_loss.mean() + 100. * purity_loss
         self.opt.zero_grad()
         loss.backward()
         self.opt.step()
-        return recon_loss.mean().item(), trace_loss.item()
+        return recon_loss.mean().item(), purity_loss.item()
 
-    def calculate_trace_loss(self, mean_rho_real, mean_rho_imag):
-        mean_rho_square_real = mean_rho_real @ mean_rho_real - mean_rho_imag @ mean_rho_imag
-        mean_rho_square_imag = mean_rho_imag @ mean_rho_real + mean_rho_real @ mean_rho_imag
+    def calculate_purity_loss(self, mean_rho_real, mean_rho_imag):
 
-        trace_loss = ((mean_rho_square_real - 1) ** 2 + mean_rho_square_imag ** 2).sum()
-        return trace_loss
+        # purity = tr(rho^2) = | rho_00 |^2 + | rho_01 |^2 + | rho_10 |^2 + | rho_11 |^2
+
+        purity_loss = -(mean_rho_real ** 2 + mean_rho_imag ** 2).sum()
+        return purity_loss
 
     def calculate_latent(self, data: np.array):
         rho_reals, rho_imags, probs = [], [], []
@@ -203,8 +209,8 @@ class QAE(ModelBaseClass):
         z = self.prepare_state(theta, phi)
 
         print(
-            'trace_loss: ', 
-            self.calculate_trace_loss(
+            'purity_loss: ', 
+            self.calculate_purity_loss(
                 torch.from_numpy(mean_rho_real),
                 torch.from_numpy(mean_rho_imag),
             ).item()

@@ -4,10 +4,11 @@ import numpy as np
 import torch
 from torch import nn
 
-from utils import bits_to_ints, epsilon, get_pmf
+from utils import bits_to_ints, epsilon, get_pmf, evaluate
 from .base import ModelBaseClass
 from .utils import EMA, DataGenerator, sample_from, counts
 from .torch_circuit import ParallelRY, Entangle
+from tqdm import tqdm
 
 
 class Generator(nn.Module):
@@ -75,21 +76,29 @@ class QCBM(ModelBaseClass):
         self.optim = torch.optim.Adam(params=self.generator.parameters(), lr=1e-2)
 
     def fit(self, data: np.array) -> np.array:
-        data_counts = counts(data, self.n_qubit)
         
-        data_pmf = get_pmf(data_counts)
+        data_dist = counts(data, self.n_qubit)
+        epoch_div_history = []
+        
+        data_pmf = get_pmf(data_dist)
         data_pmf = torch.from_numpy(data_pmf).float().to(self.device)
         for i_epoch in range(self.n_epoch):
             mmd_losses = []
-            for _ in DataGenerator(data, self.batch_size):
+            for _ in tqdm(DataGenerator(data, self.batch_size)):
                 mmd_loss = self.train_generator(data_pmf)
                 mmd_losses.append(mmd_loss)
             
-            print(f'{i_epoch} MMD: {np.mean(mmd_losses):4f}')
+            epoch_div_history.append(evaluate(data_dist, self.output_dist))
+            if (i_epoch+1) % 5 == 0:
+                print(f'epoch: {i_epoch+1} MMD: {np.mean(mmd_losses):4f}', end=' ')
+                print(epoch_div_history[-1])
         
-        return self.get_outcome()
+        kl_div = [x['kl'] for x in epoch_div_history]
+        js_div = [x['js'] for x in epoch_div_history]
+        
+        return kl_div, js_div
 
-    def get_outcome(self):
+    def output_dist(self):
         z = self.get_prior()
         with torch.no_grad():
             gen_probs = self.generator(z)

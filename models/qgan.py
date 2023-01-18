@@ -4,10 +4,11 @@ import numpy as np
 import torch
 from torch import nn
 
-from utils import bits_to_ints, epsilon
+from utils import bits_to_ints, epsilon, evaluate
 from .base import ModelBaseClass
-from .utils import EMA, DataGenerator, sample_from
+from .utils import EMA, DataGenerator, sample_from, counts
 from .torch_circuit import ParallelRY, Entangle
+from tqdm import tqdm
 
 
 class Generator(nn.Module):
@@ -61,6 +62,10 @@ class QGAN(ModelBaseClass):
         self.d_optim = torch.optim.Adam(params=self.discriminator.parameters(), lr=1e-2, amsgrad=True)
 
     def fit(self, data: np.array) -> np.array:
+
+        data_dist = counts(data, self.n_qubit)
+        epoch_div_history = []
+
         for i_epoch in range(self.n_epoch):
             g_losses, d_losses = [], []
             for real_batch in DataGenerator(data, self.batch_size):
@@ -69,17 +74,15 @@ class QGAN(ModelBaseClass):
                 d_loss = self.train_discriminator(real_batch)
                 d_losses.append(d_loss)
 
-            print(f'{i_epoch} {np.mean(g_losses):4f} {np.mean(d_losses):4f}', end=' ')
+            epoch_div_history.append(evaluate(data_dist, self.output_dist()))
+            if (i_epoch + 1) % 5 == 0:
+                print(f'epoch: {i_epoch+1} G_loss: {np.mean(g_losses):4f} D_loss: {np.mean(d_losses):4f}', end=' ')
+                print(epoch_div_history[-1])
 
             # Ref: https://papers.nips.cc/paper/5423-generative-adversarial-nets.pdf
-            mean_d_loss = np.mean(d_losses)
-            print(f'JS: {np.log(2) - mean_d_loss / 2:.4f}')
-        
-        z = self.get_prior(1)
-        with torch.no_grad():
-            gen_probs = self.generator(z)
-
-        return gen_probs[0].cpu().data.numpy()
+        kl_div = [x['kl'] for x in epoch_div_history]
+        js_div = [x['js'] for x in epoch_div_history]
+        return kl_div, js_div
 
     def train_generator(self):
         z = self.get_prior(self.batch_size)
@@ -120,3 +123,9 @@ class QGAN(ModelBaseClass):
         z[:, 0] = 1
         # prepare initial state at "0"
         return z
+
+    def output_dist(self):
+        z = self.get_prior(1)
+        with torch.no_grad():
+            gen_probs = self.generator(z)
+        return gen_probs[0].cpu().data.numpy()
