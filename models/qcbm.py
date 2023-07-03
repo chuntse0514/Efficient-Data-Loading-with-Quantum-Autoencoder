@@ -7,8 +7,7 @@ from torch import nn
 from utils import bits_to_ints, epsilon, get_pmf, evaluate
 from .base import ModelBaseClass
 from .utils import EMA, DataGenerator, sample_from, counts
-from .torch_circuit import ParallelRY, Entangle
-from tqdm import tqdm
+from .torch_circuit import ParallelRYComplex, ParallelRXComplex, EntangleComplex
 
 
 class Generator(nn.Module):
@@ -16,18 +15,26 @@ class Generator(nn.Module):
     def __init__(self, n_qubit: int, k: int):
         super().__init__()
         self.n_qubit = n_qubit
-        self.preparation_layer = ParallelRY(n_qubit)
+        self.preparation_layer = nn.Sequential(
+            ParallelRXComplex(n_qubit),
+            ParallelRYComplex(n_qubit),
+            ParallelRXComplex(n_qubit)
+        )
 
         self.layers = nn.ModuleList()
         for _ in range(k):
-            self.layers.append(Entangle(n_qubit))
-            self.layers.append(ParallelRY(n_qubit))
+            self.layers.append(EntangleComplex(n_qubit))
+            self.layers.append([
+                ParallelRXComplex(n_qubit),
+                ParallelRYComplex(n_qubit),
+                ParallelRYComplex(n_qubit)
+            ])
 
     def forward(self, x):
         x = self.preparation_layer(x)
         for layer in self.layers:
             x = layer(x)
-        probs = torch.abs(x) ** 2
+        probs = x[0] ** 2 + x[1] ** 2
         return probs
 
 
@@ -63,7 +70,7 @@ class MMD(nn.Module):
 
 class QCBM(ModelBaseClass):
 
-    def __init__(self, n_qubit: int, batch_size: int, n_epoch: int, circuit_depth: int, **kwargs):
+    def __init__(self, n_qubit: int, batch_size: int, n_epoch: int, circuit_depth: int, lr: float, **kwargs):
         self.n_qubit = n_qubit
         self.batch_size = batch_size
         self.n_epoch = n_epoch
@@ -73,7 +80,7 @@ class QCBM(ModelBaseClass):
         self.mmd = MMD([0.5, 1., 2., 4.], n_qubit=n_qubit).to(self.device)
         
         self.generator = Generator(self.n_qubit, k=circuit_depth).to(self.device)
-        self.optim = torch.optim.Adam(params=self.generator.parameters(), lr=1e-2)
+        self.optim = torch.optim.Adam(params=self.generator.parameters(), lr=lr)
 
     def fit(self, data: np.array) -> np.array:
         
@@ -84,11 +91,11 @@ class QCBM(ModelBaseClass):
         data_pmf = torch.from_numpy(data_pmf).float().to(self.device)
         for i_epoch in range(self.n_epoch):
             mmd_losses = []
-            for _ in tqdm(DataGenerator(data, self.batch_size)):
+            for _ in DataGenerator(data, self.batch_size):
                 mmd_loss = self.train_generator(data_pmf)
                 mmd_losses.append(mmd_loss)
             
-            epoch_div_history.append(evaluate(data_dist, self.output_dist))
+            epoch_div_history.append(evaluate(data_dist, self.output_dist()))
             if (i_epoch+1) % 5 == 0:
                 print(f'epoch: {i_epoch+1} MMD: {np.mean(mmd_losses):4f}', end=' ')
                 print(epoch_div_history[-1])

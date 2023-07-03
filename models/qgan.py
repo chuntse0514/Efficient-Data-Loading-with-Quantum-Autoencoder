@@ -8,7 +8,6 @@ from utils import bits_to_ints, epsilon, evaluate
 from .base import ModelBaseClass
 from .utils import EMA, DataGenerator, sample_from, counts
 from .torch_circuit import ParallelRY, Entangle
-from tqdm import tqdm
 
 
 class Generator(nn.Module):
@@ -49,7 +48,7 @@ class Discriminator(nn.Module):
 
 class QGAN(ModelBaseClass):
 
-    def __init__(self, n_qubit: int, batch_size: int, n_epoch: int, circuit_depth: int, **kwargs):
+    def __init__(self, n_qubit: int, batch_size: int, n_epoch: int, circuit_depth: int, lr: float, **kwargs):
         self.n_qubit = n_qubit
         self.batch_size = batch_size
         self.n_epoch = n_epoch
@@ -58,8 +57,8 @@ class QGAN(ModelBaseClass):
         
         self.generator = Generator(self.n_qubit, k=circuit_depth).to(self.device)
         self.discriminator = Discriminator(self.n_qubit).to(self.device)
-        self.g_optim = torch.optim.Adam(params=self.generator.parameters(), lr=1e-2, amsgrad=True)
-        self.d_optim = torch.optim.Adam(params=self.discriminator.parameters(), lr=1e-2, amsgrad=True)
+        self.g_optim = torch.optim.Adam(params=self.generator.parameters(), lr=lr, amsgrad=True)
+        self.d_optim = torch.optim.Adam(params=self.discriminator.parameters(), lr=lr, amsgrad=True)
 
     def fit(self, data: np.array) -> np.array:
 

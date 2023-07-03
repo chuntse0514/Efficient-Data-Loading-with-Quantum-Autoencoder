@@ -27,4 +27,4 @@ class Bimodal(DataBaseClass):
             p = self.get_point()
             if 0 <= p < self.range - 1:
                 ds.append(p)
-        return np.round(ds).astype(np.int)
+        return np.round(ds).astype(int)

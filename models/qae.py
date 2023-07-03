@@ -14,7 +14,6 @@ from .torch_circuit import (
     batch_kronecker_complex,
 )
 from utils import epsilon, ints_to_onehot, evaluate
-from tqdm import tqdm
 
 
 class Encoder(nn.Module):
@@ -63,7 +62,7 @@ class Decoder(nn.Module):
 
 class QAE(ModelBaseClass):
 
-    def __init__(self, n_qubit: int, batch_size: int, n_epoch: int, circuit_depth: int, **kwargs):
+    def __init__(self, n_qubit: int, batch_size: int, n_epoch: int, circuit_depth: int, lr: float, **kwargs):
         self.n_qubit = n_qubit
         self.batch_size = batch_size
         self.n_epoch = n_epoch
@@ -72,7 +71,7 @@ class QAE(ModelBaseClass):
         self.decoder = Decoder(n_qubit, k=circuit_depth).to(self.device)
         self.opt = torch.optim.Adam(
             list(self.encoder.parameters()) + list(self.decoder.parameters()),
-            lr=1e-2
+            lr=lr
         )
 
     def fit(self, data: np.array) -> np.array:
@@ -83,7 +82,7 @@ class QAE(ModelBaseClass):
         for i_epoch in range(self.n_epoch):
             recon_losses = []
             purity_losses = []
-            for real_batch in tqdm(DataGenerator(data, self.batch_size)):
+            for real_batch in DataGenerator(data, self.batch_size):
                 recon_loss, purity_loss = self.fit_batch(real_batch)
                 recon_losses.append(recon_loss)
                 purity_losses.append(purity_loss)

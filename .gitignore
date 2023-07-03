@@ -1,2 +1,6 @@
 .idea
 __pycache__/
+results/
+model-runner/
+*.csv
+*.ipynb

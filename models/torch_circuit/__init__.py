@@ -8,6 +8,7 @@ from torch import nn
 def kronecker(A, B):
     return torch.einsum("ab,cd->acbd", A, B).view(A.size(0)*B.size(0),  A.size(1)*B.size(1))
 
+
 def kronecker_complex(A: tuple, B: tuple):
     A_r, A_i = A
     B_r, B_i = B
@@ -40,13 +41,12 @@ class ParallelRY(nn.Module):
         )
 
     def forward(self, x: torch.Tensor):
-        cos = torch.cos(self.params).view(self.n_qubit, 1)
-        sin = torch.sin(self.params).view(self.n_qubit, 1)
+        cos = torch.cos(self.params / 2).view(self.n_qubit, 1)
+        sin = torch.sin(self.params / 2).view(self.n_qubit, 1)
         single_qubit_gates = torch.cat([cos, -sin, sin, cos], dim=1).view(self.n_qubit, 2, 2)
         
         self.op = reduce(lambda x, y: kronecker(x, y), single_qubit_gates)
         return x @ self.op
-
 
 class ParallelRYComplex(nn.Module):
 
@@ -58,8 +58,8 @@ class ParallelRYComplex(nn.Module):
         )
 
     def forward(self, x: tuple):
-        cos = torch.cos(self.params).view(self.n_qubit, 1)
-        sin = torch.sin(self.params).view(self.n_qubit, 1)
+        cos = torch.cos(self.params / 2).view(self.n_qubit, 1)
+        sin = torch.sin(self.params / 2).view(self.n_qubit, 1)
         single_qubit_gates = torch.cat([cos, -sin, sin, cos], dim=-1).view(self.n_qubit, 2, 2)
         op = reduce(lambda a, b: kronecker(a, b), single_qubit_gates)
         return (x[0] @ op, x[1] @ op)
@@ -74,14 +74,99 @@ class ParallelRXComplex(nn.Module):
         )
 
     def forward(self, x: tuple):
-        cos = torch.cos(self.params).view(self.n_qubit, 1)
-        sin = torch.sin(self.params).view(self.n_qubit, 1)
-        single_qubit_gates_real = torch.cat([cos, 0, 0, cos], dim=-1).view(self.n_qubit, 2, 2)
-        single_qubit_gates_imag = torch.cat([0, -sin, -sin, 0], dim=-1).view(self.n_qubit, 2, 2)
-        op = reduce(lambda a, b: kronecker(a, b), zip(single_qubit_gates_real, single_qubit_gates_imag))
+        cos = torch.cos(self.params / 2).view(self.n_qubit, 1)
+        sin = torch.sin(self.params / 2).view(self.n_qubit, 1)
+        zero = torch.zeros_like(cos)
+
+        real_gate = torch.cat([cos, zero, zero, cos], dim=-1).view(self.n_qubit, 2, 2)
+        imag_gate = torch.cat([zero, -sin, -sin, zero], dim=-1).view(self.n_qubit, 2, 2)
+
+        op = reduce(lambda a, b: kronecker_complex(a, b), zip(real_gate, imag_gate))
+        return (x[0] @ op[0] - x[1] @ op[1], x[0] @ op[1] + x[1] @ op[0])
+    
+class ParallelRZComplex(nn.Module):
+    
+    def __init__(self, n_qubit: int):
+        super().__init__()
+        self.n_qubit = n_qubit
+        self.params = nn.Parameter(
+            (torch.rand([n_qubit]) * 2 - 1) * np.pi
+        )
+    
+    def forward(self, x: tuple):
+        cos = torch.cos(self.params / 2).view(self.n_qubit, 1)
+        sin = torch.sin(self.params / 2).view(self.n_qubit, 1)
+        zero = torch.zeros_like(cos)
+
+        real_gate = torch.cat([cos, zero, zero, cos], dim=-1).view(self.n_qubit, 2, 2)
+        imag_gate = torch.cat([-sin, zero, zero, sin], dim=-1).view(self.n_qubit, 2, 2)
+
+        op = reduce(lambda a, b: kronecker_complex(a, b), zip(real_gate, imag_gate))
+        return (x[0] @ op[0] - x[1] @ op[1], x[0] @ op[1] + x[1] @ op[0])
+
+class Mølmer_Sørensen_XX_gate(nn.Module):
+
+    def __init__(self, n_qubit: int, index: int):
+        super().__init__()
+        self.n_qubit = n_qubit
+        self.params = nn.Parameter(
+            (torch.rand(1) * 2 - 1) * np.pi
+        )
+        self.id1_real = nn.Parameter(torch.eye(2 ** index), requires_grad=False)
+        self.id1_imag = nn.Parameter(torch.zeros(2 ** index, 2 ** index), requires_grad=False)
+        
+        self.id2_real = nn.Parameter(torch.eye(2 ** (n_qubit - index - 2)), requires_grad=False)
+        self.id2_imag = nn.Parameter(torch.zeros(2 ** (n_qubit - index - 2), 2 ** (n_qubit - index - 2)), requires_grad=False)
+
+        self.asdf = nn.Parameter(torch.eye(3), requires_grad=False)
+
+
+    def forward(self, x: tuple):
+
+        cos = torch.cos(self.params)
+        sin = torch.sin(self.params)
+        zero = torch.zeros_like(cos)
+
+        real_gate = torch.cat([
+            cos, zero, zero, zero, \
+            zero, cos, zero, zero, \
+            zero, zero, cos, zero, \
+            zero, zero, zero, cos
+        ], dim=-1).view(4, 4)
+
+        imag_gate = torch.cat([
+            zero, zero, zero, -sin, \
+            zero, zero, -sin, zero, \
+            zero, -sin, zero, zero, \
+            -sin, zero, zero, zero
+        ], dim=-1).view(4, 4)
+
+        complex_gate = (real_gate, imag_gate)
+        id1 = (self.id1_real, self.id1_imag)
+        id2 = (self.id2_real, self.id2_imag)
+
+        op = kronecker_complex(id1, complex_gate)
+        op = kronecker_complex(op, id2)
+
         return (x[0] @ op[0] - x[1] @ op[1], x[0] @ op[1] + x[1] @ op[0])
 
 
+class Mølmer_Sørensen_XX_layer(nn.Module):
+
+    def __init__(self, n_qubit: int):
+        super().__init__()
+        
+        self.n_qubit = n_qubit
+        self.layer = nn.ModuleList()
+        for i in range(n_qubit - 1):
+            self.layer.append(Mølmer_Sørensen_XX_gate(n_qubit, i))
+
+    def forward(self, x: tuple):
+        
+        for gate in self.layer:
+            x = gate(x)
+        return x
+    
 class Entangle(nn.Module):
 
     def __init__(self, n_qubit: int):
@@ -136,3 +221,39 @@ class Exp(nn.Module):
     def binary(self, x, bits):
         mask = 2 ** torch.arange(bits).to(x.device, x.dtype)
         return x.unsqueeze(-1).bitwise_and(mask).ne(0).byte()
+    
+def test_torch():
+
+    n_qubit = 5
+    params = (torch.rand([n_qubit]) * 2 - 1) * np.pi
+
+    cos = torch.cos(params / 2).view(n_qubit, 1) 
+    sin = torch.sin(params / 2).view(n_qubit, 1)
+    zero = torch.zeros_like(cos)
+
+    real = torch.cat([cos, zero, zero, cos], dim=-1).view(n_qubit, 2, 2)
+    imag = torch.cat([zero, -sin, -sin, zero], dim=-1).view(n_qubit, 2, 2)
+
+    op = reduce(lambda a, b: kronecker_complex(a, b), zip(real, imag))
+
+    print(op)
+
+def test_circuit():
+
+    n_qubit = 4
+
+    x_real = torch.empty(2 ** n_qubit).normal_()
+    x_imag = torch.empty(2 ** n_qubit).normal_()
+    
+    x = (x_real, x_imag)
+
+    print(torch.sum(x[0] ** 2 + x[1] ** 2))
+
+    layer = Mølmer_Sørensen_XX_gate(
+        n_qubit=n_qubit,
+        connectivity='all-to-all'
+    )
+
+    y = layer(x)
+
+    print(torch.sum(y[0] ** 2 + y[1] ** 2))

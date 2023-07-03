@@ -1,8 +1,15 @@
 import pytest
 import torch
 import numpy as np
-
-from ...torch_circuit import ParallelRYComplex, EntangleComplex, ParallelRY, Entangle
+from ...torch_circuit import (
+    ParallelRXComplex,
+    ParallelRYComplex,
+    ParallelRZComplex,
+    Mølmer_Sørensen_XX_gate,
+    EntangleComplex, 
+    ParallelRY, 
+    Entangle
+)
 from models.qae import Decoder
 
 n_qubit = 3
@@ -25,7 +32,11 @@ def test_unitary_matrix(layer):
 
 
 @pytest.mark.parametrize("layer", [
+    ParallelRXComplex(n_qubit),
     ParallelRYComplex(n_qubit), 
+    ParallelRZComplex(n_qubit),
+    Mølmer_Sørensen_XX_gate(n_qubit, connectivity='linear'),
+    Mølmer_Sørensen_XX_gate(n_qubit, connectivity='all-to-all'),
     EntangleComplex(n_qubit),
     Decoder(n_qubit, 3),
 ])

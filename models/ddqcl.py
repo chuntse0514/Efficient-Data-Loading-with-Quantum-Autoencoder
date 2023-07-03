@@ -8,23 +8,29 @@ from pprint import pprint
 from .base import ModelBaseClass
 from .utils import DataGenerator, sample_from, counts
 from .torch_circuit import (
+    ParallelRXComplex,
     ParallelRYComplex, 
     EntangleComplex, 
+    Mølmer_Sørensen_XX_layer,
     Exp, 
     batch_kronecker_complex,
 )
 from utils import epsilon, ints_to_onehot, evaluate
-from tqdm import tqdm
 
 
 class Decoder(nn.Module):
 
     def __init__(self, n_qubit: int, k: int):
         super().__init__()
-        self.preparation_layer = ParallelRYComplex(n_qubit)
+        self.preparation_layer = nn.Sequential(
+            ParallelRXComplex(n_qubit),
+            ParallelRYComplex(n_qubit),
+            ParallelRXComplex(n_qubit)
+        )
         self.layers = nn.ModuleList()
         for _ in range(k):
-            self.layers.append(EntangleComplex(n_qubit))
+            # self.layers.append(EntangleComplex(n_qubit))
+            self.layers.append(Mølmer_Sørensen_XX_layer(n_qubit))
             self.layers.append(ParallelRYComplex(n_qubit))
 
     def forward_prob(self, x):
@@ -41,7 +47,7 @@ class Decoder(nn.Module):
 
 class DDQCL(ModelBaseClass):
 
-    def __init__(self, n_qubit: int, batch_size: int, n_epoch: int, circuit_depth: int, **kwargs):
+    def __init__(self, n_qubit: int, batch_size: int, n_epoch: int, circuit_depth: int, lr: float,**kwargs):
         self.n_qubit = n_qubit
         self.batch_size = batch_size
         self.n_epoch = n_epoch
@@ -49,7 +55,7 @@ class DDQCL(ModelBaseClass):
         self.decoder = Decoder(n_qubit, k=circuit_depth).to(self.device)
         self.opt = torch.optim.Adam(
             list(self.decoder.parameters()),
-            lr=1e-2
+            lr=lr
         )
 
     def fit(self, data: np.array) -> np.array:
@@ -59,7 +65,7 @@ class DDQCL(ModelBaseClass):
 
         for i_epoch in range(self.n_epoch):
             nlls = []
-            for real_batch in tqdm(DataGenerator(data, self.batch_size)):
+            for real_batch in DataGenerator(data, self.batch_size):
                 nll = self.fit_batch(real_batch)
                 nlls.append(nll)
 
