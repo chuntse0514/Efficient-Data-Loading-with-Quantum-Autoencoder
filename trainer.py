@@ -81,7 +81,7 @@ def data_plotter(kl_results, js_results):
     ax2.grid()
     ax2.set_title('JS divergence of {} data'.format(CONFIG['data']))
 
-    plt.savefig('./images/{}-{}.png'.format(CONFIG['model'], CONFIG['data']))
+    # plt.savefig('./images/{}-{}.png'.format(CONFIG['model'], CONFIG['data']))
     plt.show()
 
 def save_result(kl_results, js_results):

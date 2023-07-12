@@ -89,7 +89,7 @@ class QAE(ModelBaseClass):
 
             epoch_div_history.append(evaluate(data_dist, self.output_dist(data)))
             if (i_epoch+1) % 5 == 0:
-                print(f'epoch{i_epoch+1:3d} RECON: {np.mean(recon_losses):4f} Avg_purity: {-np.mean(purity_losses)/self.n_qubit:4f}')
+                print(f'epoch{i_epoch+1:3d} RECON: {np.mean(recon_losses):4f} Avg_purity: {-np.mean(purity_losses)/self.n_qubit:4f}', end=' ')
                 print(epoch_div_history[-1])
 
         kl_div = [x['kl'] for x in epoch_div_history]
