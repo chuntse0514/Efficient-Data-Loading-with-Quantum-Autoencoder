@@ -7,7 +7,7 @@ from torch import nn
 from utils import bits_to_ints, epsilon, evaluate
 from .base import ModelBaseClass
 from .utils import EMA, DataGenerator, sample_from, counts
-from .torch_circuit import ParallelRY, Entangle
+from .torch_circuit import ParallelRYComplex, ParallelRXComplex, EntangleComplex
 
 
 class Generator(nn.Module):
@@ -15,18 +15,22 @@ class Generator(nn.Module):
     def __init__(self, n_qubit: int, k: int):
         super().__init__()
         self.n_qubit = n_qubit
-        self.preparation_layer = ParallelRY(n_qubit)
+        self.preparation_layer = nn.Sequential(
+            ParallelRXComplex(n_qubit),
+            ParallelRYComplex(n_qubit),
+            ParallelRXComplex(n_qubit)
+        )
 
         self.layers = nn.ModuleList()
         for _ in range(k):
-            self.layers.append(Entangle(n_qubit))
-            self.layers.append(ParallelRY(n_qubit))
+            self.layers.append(EntangleComplex(n_qubit))
+            self.layers.append(ParallelRYComplex(n_qubit))
 
-    def forward(self, x):
+    def forward(self, x: tuple):
         x = self.preparation_layer(x)
         for layer in self.layers:
             x = layer(x)
-        probs = torch.abs(x) ** 2
+        probs = x[0] ** 2 + x[1] ** 2
         return probs
 
 
@@ -84,8 +88,8 @@ class QGAN(ModelBaseClass):
         return kl_div, js_div
 
     def train_generator(self):
-        z = self.get_prior(self.batch_size)
-        fake_probs = self.generator(z)
+        z = self.get_prior()
+        fake_probs = self.generator(z).repeat(self.batch_size, 1)
         fake_data = sample_from(fake_probs)
         fake_score = self.discriminator(fake_data)
         loss_fn = torch.nn.BCEWithLogitsLoss(reduction='none')
@@ -102,8 +106,8 @@ class QGAN(ModelBaseClass):
         return g_loss.item()
 
     def train_discriminator(self, real_batch: np.array):
-        z = self.get_prior(self.batch_size)
-        fake_probs = self.generator(z)
+        z = self.get_prior()
+        fake_probs = self.generator(z).repeat(self.batch_size, 1)
         fake_data = sample_from(fake_probs)
         fake_score = self.discriminator(fake_data)
 
@@ -117,14 +121,15 @@ class QGAN(ModelBaseClass):
         self.d_optim.step()
         return d_loss.item()
 
-    def get_prior(self, size: int) -> torch.Tensor:
-        z = torch.zeros([size, 2 ** self.n_qubit]).to(self.device)
-        z[:, 0] = 1
+    def get_prior(self) -> torch.Tensor:
+        z_real = torch.zeros([1, 2 ** self.n_qubit]).to(self.device)
+        z_real[:, 0] = 1.
+        z_imag = torch.zeros_like(z_real)
         # prepare initial state at "0"
-        return z
+        return z_real, z_imag
 
     def output_dist(self):
-        z = self.get_prior(1)
+        z = self.get_prior()
         with torch.no_grad():
             gen_probs = self.generator(z)
         return gen_probs[0].cpu().data.numpy()

@@ -1,8 +1,8 @@
 CONFIG = {
-    'data': 'log normal 10',
+    'data': 'bas 3x3',
     'N': 20000,
     'show_data_hist': True,
-    'model': 'DDQCL',
+    'model': 'QAE',
     'circuit_depth': 10,
     'batch_size': 2000,
     'n_epoch': 100,

@@ -24,11 +24,7 @@ class Generator(nn.Module):
         self.layers = nn.ModuleList()
         for _ in range(k):
             self.layers.append(EntangleComplex(n_qubit))
-            self.layers.append([
-                ParallelRXComplex(n_qubit),
-                ParallelRYComplex(n_qubit),
-                ParallelRYComplex(n_qubit)
-            ])
+            self.layers.append(ParallelRYComplex(n_qubit))
 
     def forward(self, x):
         x = self.preparation_layer(x)
@@ -111,29 +107,40 @@ class QCBM(ModelBaseClass):
             gen_probs = self.generator(z)
         return gen_probs[0].cpu().data.numpy()
 
-    def train_generator(self, data_pmf: torch.Tensor):
-        z = self.get_prior().repeat(self.batch_size, 1)
-        fake_probs = self.generator(z)
-
-        fake_data = sample_from(fake_probs)      
-        selected_probs = torch.gather(fake_probs, dim=-1, index=fake_data)
-        log_selected_probs = torch.log(selected_probs + epsilon).squeeze(dim=-1)
-
-        fake_data_pmf = (torch.arange(2 ** self.n_qubit, device=self.device) == fake_data).sum(dim=0).float() / self.batch_size
+    # def train_generator(self, data_pmf: torch.Tensor):
+    #     z = self.get_prior()
+    #     fake_probs = self.generator(z).repeat(self.batch_size, 1)
         
-        mmd = self.mmd(data_pmf, fake_data_pmf)
-        reward = -mmd
-        baseline = self.ema(reward.mean().data)
+    #     fake_data = sample_from(fake_probs)      
+    #     selected_probs = torch.gather(fake_probs, dim=-1, index=fake_data)
+    #     log_selected_probs = torch.log(selected_probs + epsilon).squeeze(dim=-1)
 
-        loss = (-(reward - baseline) * log_selected_probs).mean()
+    #     fake_data_pmf = (torch.arange(2 ** self.n_qubit, device=self.device) == fake_data).sum(dim=0).float() / self.batch_size
+        
+    #     mmd = self.mmd(data_pmf, fake_data_pmf)
+    #     reward = -mmd
+    #     baseline = self.ema(reward.mean().data)
+
+    #     loss = (-(reward - baseline) * log_selected_probs).mean()
+
+    #     self.optim.zero_grad()
+    #     loss.backward()
+    #     self.optim.step()
+    #     return mmd.item()
+    def train_generator(self, data_pmf: torch.Tensor):
+        z = self.get_prior()
+        fake_probs = self.generator(z).squeeze()
+
+        mmd = self.mmd(data_pmf, fake_probs)
 
         self.optim.zero_grad()
-        loss.backward()
+        mmd.backward()
         self.optim.step()
         return mmd.item()
 
     def get_prior(self) -> torch.Tensor:
-        z = torch.zeros([1, 2 ** self.n_qubit]).to(self.device)
-        z[:, 0] = 1
+        z_real = torch.zeros([1, 2 ** self.n_qubit]).to(self.device)
+        z_real[:, 0] = 1.
+        z_imag = torch.zeros_like(z_real)
         # prepare initial state at "0"
-        return z
+        return z_real, z_imag

@@ -29,8 +29,8 @@ class Decoder(nn.Module):
         )
         self.layers = nn.ModuleList()
         for _ in range(k):
-            # self.layers.append(EntangleComplex(n_qubit))
-            self.layers.append(Mølmer_Sørensen_XX_layer(n_qubit))
+            self.layers.append(EntangleComplex(n_qubit))
+            # self.layers.append(Mølmer_Sørensen_XX_layer(n_qubit))
             self.layers.append(ParallelRYComplex(n_qubit))
 
     def forward_prob(self, x):
